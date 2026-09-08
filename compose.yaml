@@ -1,0 +1,146 @@
+name: isec6000-assessment2
+
+services:
+  docker:
+    # Separate Docker engine for pipeline container operations.
+    # DinD requires privileged mode; its ports are not published.
+    image: docker:29.8.0-dind
+    privileged: true
+    restart: unless-stopped
+
+    environment:
+      # Generate certificates for authenticated, encrypted Docker access.
+      DOCKER_TLS_CERTDIR: /certs
+
+    volumes:
+      # Preserve certificates and share client certificates.
+      - docker-certs:/certs
+      - docker-client-certs:/certs/client
+
+      # Preserve images and other inner Docker engine data.
+      - docker-data:/var/lib/docker
+
+      # Match the agent workspace path for pipeline container mounts.
+      - agent-data:/home/jenkins/agent
+
+    networks:
+      - ci
+
+    healthcheck:
+      # Check that the Docker engine accepts authenticated TLS requests.
+      test:
+        - CMD-SHELL
+        - "DOCKER_HOST=tcp://localhost:2376 DOCKER_TLS_VERIFY=1 DOCKER_CERT_PATH=/certs/client docker info > /dev/null 2>&1"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  jenkins:
+    # Build the controller from our custom Dockerfile.
+    build:
+      context: ./jenkins
+    image: isec6000-jenkins:assessment2
+    user: "1000:1000"
+    restart: unless-stopped
+
+    depends_on:
+      docker:
+        condition: service_healthy
+
+    environment:
+      # Connect to DinD through the internal network using TLS.
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+
+      # Limit controller Java heap usage on the 4 GiB server.
+      JAVA_OPTS: "-Xms256m -Xmx1024m"
+
+    ports:
+      # Access through the VM loopback interface and SSH tunnel.
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      # Preserve settings, accounts, jobs, logs and archived artifacts.
+      - jenkins-data:/var/jenkins_home
+
+      # Read-only access to Docker client certificates.
+      - docker-client-certs:/certs/client:ro
+
+    networks:
+      - ci
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+  agent:
+    # Dedicated build agent with Git, Java and the Docker client.
+    build:
+      context: ./agent
+    image: isec6000-agent:assessment2
+    user: "1000:1000"
+    init: true
+    restart: unless-stopped
+
+    depends_on:
+      jenkins:
+        condition: service_started
+      docker:
+        condition: service_healthy
+
+    environment:
+      # Connect internally using WebSocket without publishing an agent port.
+      JENKINS_URL: http://jenkins:8080/
+      JENKINS_AGENT_NAME: docker-agent
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      JENKINS_WEB_SOCKET: "true"
+
+      # Read the connection secret from the ignored local .env file.
+      JENKINS_SECRET: "${JENKINS_AGENT_SECRET:?Set JENKINS_AGENT_SECRET in .env}"
+
+      # Authenticate to DinD using client certificates.
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+
+      # Limit the agent Java heap.
+      JAVA_OPTS: "-Xms128m -Xmx512m"
+
+    volumes:
+      # Keep agent workspaces separate from controller data.
+      - agent-data:/home/jenkins/agent
+      - docker-client-certs:/certs/client:ro
+
+    networks:
+      - ci
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+networks:
+  # Dedicated network connecting the three services.
+  ci:
+    driver: bridge
+
+volumes:
+  # Controller configuration, accounts, jobs and build records.
+  jenkins-data:
+
+  # Images and data stored by the inner Docker engine.
+  docker-data:
+
+  # Docker server certificates.
+  docker-certs:
+
+  # Docker client certificates shared with Jenkins and the agent.
+  docker-client-certs:
+
+  # Agent workspaces shared with DinD at the same container path.
+  agent-data:
