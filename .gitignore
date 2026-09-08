@@ -1,0 +1,15 @@
+# Local environment settings and secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Local Jenkins and Docker runtime data
+jenkins_home/
+docker-data/
+certs/
+
+# macOS metadata
+.DS_Store
