@@ -54,8 +54,8 @@ services:
       DOCKER_TLS_VERIFY: "1"
       DOCKER_CERT_PATH: /certs/client
 
-      # Limit controller Java heap usage on the 4 GiB server.
-      JAVA_OPTS: "-Xms256m -Xmx1024m"
+      # Limit the heap and expose the credential-use permission.
+      JAVA_OPTS: "-Xms256m -Xmx1024m -Dcom.cloudbees.plugins.credentials.UseItemPermission=true"
 
     ports:
       # Access through the VM loopback interface and SSH tunnel.
