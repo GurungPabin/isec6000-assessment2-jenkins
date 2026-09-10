@@ -29,4 +29,5 @@ RUN jenkins-plugin-cli --plugins \
     credentials-binding \
     junit \
     timestamper \
-    pipeline-graph-view
+    pipeline-graph-view \
+    authorize-project
